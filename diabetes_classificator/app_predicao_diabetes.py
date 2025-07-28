@@ -4,6 +4,29 @@ import joblib
 import os
 import asyncio
 import nest_asyncio
+import requests
+
+def download_modelo() -> pd.DataFrame:
+    """
+    Faz o download do modelo mais recente.
+
+    Returns:
+        sdp_dataset (pandas.DataFrame): DataFrame com os dados carregados.
+    """
+    url = "https://github.com/matheusfinger/model-pipeline-brfss/raw/main/best_model.pkl"
+    output_file = "best_model.pkl"
+
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # Verifica se houve erro na requisição
+        
+        with open(output_file, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+        
+        print(f"Arquivo baixado com sucesso: {output_file}")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao baixar o arquivo: {e}")
 
 # Importações de funções de outros arquivos
 from utils import (

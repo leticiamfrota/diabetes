@@ -1,0 +1,50 @@
+[project]
+name = "diabetes"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Letícia M Frota",email = "leticiafrotamesquita@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # Core
+    "streamlit>=1.28.0",  # Framework web
+    "pandas>=2.1.0",  # Manipulação de dados
+    "numpy>=2.3.2",  # Computação numérica
+    
+    # Machine Learning
+    "scikit-learn>=1.2.0",  # Modelos ML
+    "joblib>=1.2.0",  # Serialização de modelos
+    
+    # RAG Components
+    "langchain>=0.3.27; python_version < '4.0'", 
+    "langchain-huggingface>=0.0.4",
+    "langchain_community>=0.3.27; python_version < '4.0'",
+    "chromadb>=1.0.15",  # Vector store
+    "sentence-transformers>=2.2.0",  # Embeddings locais
+    "faiss-cpu>=1.7.4",
+    
+    # Utilitários
+    "nest-asyncio>=1.5.0",  # Compatibilidade asyncio
+    "tiktoken>=0.9.0",  # Tokenização
+    "python-dotenv>=1.0.0",  # Gerenciamento de env vars
+    "requests>=2.31.0",
+    
+    # OpenAI (opcional - só se usar OpenAI API)
+    "openai>=0.27.0; extra == 'openai'"
+]
+
+
+[tool.poetry]
+name = "diabetes_classificator"
+version = "0.1.0"
+description = "Sistema de predição de diabetes"
+authors = ["Letícia M Frota <leticiafrotamesquita@gmail.com>"]
+packages = [
+    { include = "diabetes_classificator" }
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
