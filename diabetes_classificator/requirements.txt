@@ -6,5 +6,3 @@ seaborn
 requests
 joblib
 imbalanced-learn
-scikit-learn==1.2.2
-joblib==1.1.0
