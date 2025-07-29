@@ -5,8 +5,9 @@ import os
 import asyncio
 import nest_asyncio
 import requests
+from sklearn.pipeline import Pipeline
 
-def download_modelo() -> pd.DataFrame:
+def download_modelo():
     """
     Faz o download do modelo mais recente.
 
@@ -24,18 +25,16 @@ def download_modelo() -> pd.DataFrame:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
         
-        print(f"Arquivo baixado com sucesso: {output_file}")
+        st.success(f"Modelo baixado com sucesso: {output_file}")
     except requests.exceptions.RequestException as e:
-        print(f"Erro ao baixar o arquivo: {e}")
+        st.error(f"Erro ao baixar o modelo: {e}. Verifique sua conexão com a internet ou o URL.")
+        st.stop()
 
 # Importações de funções de outros arquivos
 from utils import (
-    get_diabetes_article_paths,
-    REFERENCIAS_BIBLIOGRAFICAS_DIABETES,
-    interpretar_threshold,
+    interpretar_threshold
 )
-from rag_utils import setup_diabetes_explanation_rag, get_explanation_from_rag
-from model_evaluation import show_model_details_page # Importa a função de avaliação
+from model_evaluation import show_model_details_page
 
 nest_asyncio.apply()
 
@@ -52,47 +51,90 @@ def load_data(path):
     df = pd.read_csv(path)
     return df
 
+default_explanation_map = {
+    "BMI": "Body Mass Index (BMI) é um indicador comum de obesidade, que está fortemente associado a um risco aumentado de diabetes tipo 2. Manter um IMC saudável é crucial para a prevenção.",
+    "Age": "Idade é um fator de risco não modificável para diabetes tipo 2, com o risco aumentando progressivamente com o envelhecimento devido a mudanças metabólicas e menor sensibilidade à insulina.",
+    "HighBP": "Pressão Alta (hipertensão) é uma comorbidade frequente em indivíduos com diabetes, e ambos os problemas compartilham fatores de risco, aumentando o risco cardiovascular geral.",
+    "HighChol": "Níveis elevados de colesterol (dislipidemia) são frequentemente observados em pacientes com diabetes, contribuindo para o risco de doenças cardiovasculares, uma complicação comum do diabetes.",
+    "Smoker": "Fumar aumenta o risco de desenvolver diabetes tipo 2 e suas complicações, pois pode levar à resistência à insulina e inflamação sistêmica.",
+    "PhysActivity": "Atividade física regular melhora a sensibilidade à insulina e ajuda no controle do peso, reduzindo significativamente o risco de desenvolver diabetes tipo 2. A inatividade física, por outro lado, aumenta o risco.",
+    "HvyAlcoholConsump": "Consumo pesado de álcool pode impactar negativamente o metabolismo da glicose e contribuir para o ganho de peso, aumentando o risco de diabetes tipo 2.",
+    "GenHlth": "Saúde Geral autoavaliada reflete o bem-estar percebido e a presença de outras condições crônicas que podem influenciar o risco de diabetes.",
+    "MentHlth": "Problemas de Saúde Mental, como estresse crônico, depressão e ansiedade, podem indiretamente aumentar o risco de diabetes devido a mudanças no estilo de vida, hábitos alimentares e respostas hormonais (como o cortisol).",
+    "PhysHlth": "Problemas de Saúde Física frequentes ou crônicos podem indicar condições subjacentes ou um estilo de vida que aumenta a vulnerabilidade ao diabetes.",
+    "DiffWalk": "Dificuldades para Caminhar ou se mover podem ser um sinal de inatividade física e outras comorbidades, ambas elevando o risco de diabetes.",
+    "Sex": "Existem diferenças no perfil de prevalência e risco de diabetes entre os sexos biológicos, influenciadas por fatores hormonais, genéticos e de estilo de vida.",
+    "Education": "Níveis mais baixos de Escolaridade podem estar associados a menor acesso a informações de saúde e estilos de vida menos saudáveis, impactando o risco de diabetes.",
+    "Income": "Renda é um fator socioeconômico que afeta o acesso a alimentos saudáveis, cuidados médicos preventivos e outros recursos de saúde, influenciando o risco de diabetes.",
+    "Fruits": "Consumo adequado de Frutas, como parte de uma dieta equilibrada, é importante para a saúde geral e pode contribuir para a prevenção do diabetes devido ao seu teor de fibras e nutrientes.",
+    "Veggies": "Consumo de Vegetais é fundamental para uma dieta saudável, fornecendo fibras e antioxidantes que apoiam a saúde metabólica e podem reduzir o risco de diabetes.",
+    "CholCheck": "Verificação regular de Colesterol é um indicador de monitoramento da saúde e detecção precoce de fatores de risco que podem estar ligados ao diabetes.",
+    "AnyHealthcare": "Ter acesso a algum tipo de plano de saúde ou cobertura médica facilita o cuidado preventivo, o diagnóstico precoce e o manejo de condições que podem levar ao diabetes.",
+    "NoDocbcCost": "Deixar de consultar um médico por causa do Custo pode resultar em diagnóstico tardio e manejo inadequado de condições de saúde, aumentando o risco de progressão do diabetes.",
+}
 
-# --- Função para explicar o passo da árvore com base em RAG ---
-def explicar_passo_da_arvore_com_referencia(
-    nome, valor_usuario, e_menor_ou_igual, threshold, _llm_rag, _vector_store_rag
+# Novo mapa para nomes amigáveis das variáveis
+friendly_feature_names = {
+    "HighBP": "Pressão Alta",
+    "HighChol": "Colesterol Alto",
+    "CholCheck": "Checagem de Colesterol",
+    "BMI": "Índice de Massa Corporal (IMC)",
+    "Smoker": "Fumante",
+    "Stroke": "AVC (Derrame)",
+    "HeartDiseaseorAttack": "Doença Cardíaca/Infarto",
+    "PhysActivity": "Atividade Física",
+    "Fruits": "Consumo de Frutas",
+    "Veggies": "Consumo de Vegetais",
+    "HvyAlcoholConsump": "Consumo Pesado de Álcool",
+    "AnyHealthcare": "Acesso a Plano de Saúde",
+    "NoDocbcCost": "Não Consultou Médico por Custo",
+    "GenHlth": "Saúde Geral",
+    "MentHlth": "Saúde Mental",
+    "PhysHlth": "Saúde Física",
+    "DiffWalk": "Dificuldade para Caminhar",
+    "Sex": "Sexo Biológico",
+    "Age": "Faixa Etária",
+    "Education": "Escolaridade",
+    "Income": "Renda",
+}
+
+
+def explicar_passo_da_arvore(
+    nome, valor_usuario, e_menor_ou_igual, threshold
 ):
     """
-    Gera uma explicação detalhada para cada passo da árvore de decisão usando o RAG.
-    Retorna a explicação formatada e uma lista das chaves de referência citadas.
+    Gera uma explicação detalhada para cada passo da árvore de decisão usando uma resposta padrão do mapa.
+    Retorna a explicação formatada e uma lista vazia para as chaves de referência citadas.
     """
-    with st.spinner(f"Gerando explicação para {nome} com base em artigos científicos..."):
-        explanation_text, cited_keys = get_explanation_from_rag(
-            nome,
-            valor_usuario,
-            e_menor_ou_igual,
-            threshold,
-            _llm_rag,
-            _vector_store_rag,
-        )
-
     interpretacao_th_formatada = interpretar_threshold(nome, threshold)
-    direcao_texto_padrao = "é menor ou igual a" if e_menor_ou_igual else "é maior que"
+    direcao_texto_padrao = "menor ou igual a" if e_menor_ou_igual else "maior que"
 
-    full_explanation = (
-        f"** Decisão sobre `{nome}`:**\n"
-        f"- *Regra do Modelo:* O modelo verifica se `{nome}` {direcao_texto_padrao} `{interpretacao_th_formatada}`.\n"
-        f"- *Seu Valor:* `{valor_usuario}`. Como seu valor {direcao_texto_padrao} o limite, o modelo considerou:\n"
-        f"- *Justificativa:* {explanation_text}"
+    # Obtém o nome amigável do atributo, se disponível, senão usa o nome da variável
+    nome_amigavel = friendly_feature_names.get(nome, nome)
+
+    # Get explanation from the map, or a generic one if not found
+    standard_explanation = default_explanation_map.get(
+        nome,
+        f"Esta decisão se baseia em um limite predefinido para a característica '{nome_amigavel}'. "
+        f"Seu valor de '{valor_usuario}' foi comparado com o limite de '{interpretacao_th_formatada}'. "
+        f"Esta é uma das muitas regras que o modelo considera para determinar o risco de diabetes."
     )
-    return full_explanation, cited_keys
 
+    # Nova formatação da saída
+    full_explanation = (
+        f"Para o atributo **{nome_amigavel}**, seu valor é `{valor_usuario}` e o limiar é `{interpretacao_th_formatada}`. "
+        f"Esse atributo é importante para o diagnóstico porque {standard_explanation}"
+    )
+    return full_explanation
 
 # ==============================================================================
 # PÁGINA 1: ANÁLISE DE RISCO (PREDIÇÃO)
 # ==============================================================================
 def show_prediction_page():
     st.title("🩺 Análise de Risco de Diabetes com Árvore de Decisão Explicável")
+    with st.spinner("Verificando e baixando o modelo mais recente..."):
+        download_modelo()
 
-    # Setup do RAG para explicações de diabetes
-    _llm_rag_diabetes, _vector_store_rag_diabetes = setup_diabetes_explanation_rag()
-
-    # Definir as listas de colunas uma vez, de forma consistente
     columns_to_normalize = ["BMI", "GenHlth", "MentHlth", "PhysHlth", "Age", "Education", "Income"]
     columns_to_pass_through = [
         "HighBP", "HighChol", "CholCheck", "Smoker", "Stroke",
@@ -101,13 +143,12 @@ def show_prediction_page():
     ]
     feature_names = columns_to_normalize + columns_to_pass_through
 
-    # Carregar o modelo pré-treinado
     try:
-        modelo_path = "diabetes_classificator/modelos/arvore_diabetes_binario.pkl"
+        modelo_path = "best_model.pkl"
         modelo = joblib.load(modelo_path)
     except FileNotFoundError:
-        st.error(f"Erro: O arquivo do modelo '{modelo_path}' não foi encontrado.")
-        st.info("Por favor, vá para a página 'Detalhes do Modelo' para treinar e salvar um modelo primeiro.")
+        st.error(f"Erro: O arquivo do modelo '{modelo_path}' não foi encontrado após o download.")
+        st.info("Por favor, verifique a conexão ou tente novamente.")
         st.stop()
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o modelo: {e}")
@@ -154,7 +195,10 @@ def show_prediction_page():
             st.markdown("##### Dados Demográficos e Gerais")
             GenHlth = st.slider("Como você avalia sua saúde em geral? (1=Excelente, 5=Ruim)", 1, 5, 3)
             Weight = st.number_input(
-                "Qual seu peso (Km)?", min_value=0.0, max_value=400.0, value=60.0, step=0.1
+                "Qual seu peso (Kg)?", min_value=0.0, max_value=400.0, value=60.0, step=0.1
+            )
+            Height = st.number_input(
+                "Qual sua Altura (metros)?", min_value=0.0, max_value=3.0, value=1.6, step=0.1
             )
             Age = st.slider(
                 "Qual sua faixa etária?",
@@ -163,7 +207,7 @@ def show_prediction_page():
                 8,
                 help="1: 18-24, 2: 25-29, ..., 8: 55-59, ..., 13: 80 anos ou mais",
             )
-            BMI = Age/(Weight**2)
+            BMI = Weight/(Height**2)
             Income = st.slider(
                 "Qual sua faixa de renda anual? (1=Menor, 8=Maior)",
                 1,
@@ -220,7 +264,7 @@ def show_prediction_page():
                 )
             else:
                 st.success(
-                    f"**Diagnóstico Preditivo: RISCO BAIXO de ter diabetes.** (Probabilidade: {probabilidade[0]*100:.1f}%)",
+                    f"**Diagnóstico Preditivo: RISCO BAIXO de ter diabetes.** (Probabilidade: {probabilidade[1]*100:.1f}%)",
                     icon="✅",
                 )
 
@@ -230,7 +274,6 @@ def show_prediction_page():
                     icon="🗺️",
                 )
 
-                from sklearn.pipeline import Pipeline # Importa aqui para evitar circular dependency se for movido para outro lugar
                 if isinstance(modelo, Pipeline):
                     tree_model = modelo.named_steps["classifier"]
                     entrada_usuario_transformada = modelo.named_steps["preprocessor"].transform(
@@ -262,36 +305,16 @@ def show_prediction_page():
 
                     e_menor_ou_igual = valor_usuario_feature <= threshold
 
-                    explanation_text, cited_keys_for_step = (
-                        explicar_passo_da_arvore_com_referencia(
+                    explanation_text = (
+                        explicar_passo_da_arvore(
                             feature_name,
                             valor_usuario_feature,
                             e_menor_ou_igual,
                             threshold,
-                            _llm_rag_diabetes,
-                            _vector_store_rag_diabetes,
                         )
                     )
                     st.markdown(f"##### Passo {i+1}:")
                     st.markdown(explanation_text)
-                    st.markdown("---")
-                    all_cited_keys.update(
-                        cited_keys_for_step
-                    )
-
-                st.subheader("📚 Referências Bibliográficas Completas:")
-                if all_cited_keys:
-                    for key in sorted(
-                        list(all_cited_keys)
-                    ):
-                        if key in REFERENCIAS_BIBLIOGRAFICAS_DIABETES:
-                            st.markdown(f"**[{key}]** {REFERENCIAS_BIBLIOGRAFICAS_DIABETES[key]}")
-                        else:
-                            st.markdown(f"**[{key}]** Referência detalhada não encontrada para esta chave.")
-                else:
-                    st.info(
-                        "Nenhuma referência específica foi citada para os passos da árvore de decisão, ou os documentos não forneceram citações claras."
-                    )
 
 
 # ==============================================================================
